@@ -1,0 +1,6 @@
+*.code-workspace
+data
+dev
+__pycache__
+.vscode
+.ipynb_checkpoints
