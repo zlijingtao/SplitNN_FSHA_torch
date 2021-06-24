@@ -1,22 +1,14 @@
 import torch
 import numpy as np
 import torch.nn as nn
-import torch.nn.functional as F
 import architectures_torch as architectures
-import datasets_torch
 import tqdm
-import gc
-import math
 
 def init_weights(m):
-    # print(type(m))
     if type(m) == nn.Linear:
-    #     torch.nn.init.xavier_uniform(m.weight)
         torch.nn.init.xavier_uniform_(m.weight, gain=1.0)
         m.bias.data.zero_()
     if type(m) == nn.Conv2d or type(m) == nn.ConvTranspose2d:
-    #     n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-    #     m.weight.data.normal_(0, math.sqrt(2. / n))
         torch.nn.init.xavier_uniform_(m.weight, gain=1.0)
         m.bias.data.zero_()
 
@@ -41,14 +33,9 @@ class FSHA:
     def __init__(self, xpriv, xpub, id_setup, batch_size, hparams):
             input_shape = xpriv[0][0].shape
 
-            print(input_shape)
-            
             self.hparams = hparams
 
             # setup dataset
-            # self.client_dataset = xpriv.batch(batch_size, drop_remainder=True).repeat(-1)
-            # self.attacker_dataset = xpub.batch(batch_size, drop_remainder=True).repeat(-1)
-
             self.client_dataset = torch.utils.data.DataLoader(xpriv,  batch_size=batch_size, shuffle=True,
                 num_workers=4, pin_memory=True)
             self.attacker_dataset = torch.utils.data.DataLoader(xpub,  batch_size=batch_size, shuffle=True,
@@ -89,15 +76,10 @@ class FSHA:
             self.optimizer2 = torch.optim.Adam(self.D.parameters(), lr=hparams['lr_D'])
 
 
-            # for param in self.D.parameters():
-            #     print(param.data)
-
-
     @staticmethod
     def addNoise(x, alpha):
         return x + torch.randn(x.size()) * alpha
 
-    # @tf.function
     def train_step(self, x_private, x_public, label_private, label_public):
         torch.autograd.set_detect_anomaly(True)
         self.f.train()
@@ -121,7 +103,6 @@ class FSHA:
         if self.hparams['WGAN']:
             # print("Use WGAN loss")
             f_loss = torch.mean(adv_private_logits)
-            # print(adv_private_logits)
         else:
             criterion = torch.nn.BCELoss()
             f_loss = criterion(adv_private_logits, torch.ones_like(adv_private_logits.detach()))
@@ -138,8 +119,6 @@ class FSHA:
         adv_public_logits = self.D(z_public.detach())
         adv_private_logits_detached = self.D(z_private.detach())
 
-        # adv_public_logits = self.D(z_public)
-        # adv_private_logits = self.D(z_private)
         if self.hparams['WGAN']:
             loss_discr_true = torch.mean( adv_public_logits )
             loss_discr_fake = -torch.mean( adv_private_logits_detached)
@@ -154,11 +133,8 @@ class FSHA:
 
         if 'gradient_penalty' in self.hparams:
             # print("Use GP")
-            # pass
             w = float(self.hparams['gradient_penalty'])
             D_gradient_penalty = self.gradient_penalty(z_private.detach(), z_public.detach())
-            # print(D_gradient_penalty)
-            # D_gradient_penalty = self.gradient_penalty(z_private, z_public)
             D_loss += D_gradient_penalty * w
 
         ##################################################################
@@ -191,9 +167,6 @@ class FSHA:
         
         self.optimizer2.step()
 
-
-
-
         f_losses = f_loss.detach()
         tilde_f_losses = tilde_f_loss.detach()
         D_losses = D_loss.detach()
@@ -217,26 +190,6 @@ class FSHA:
         gradient_norm = gradients.norm(2, dim=1)
         penalty = ((gradient_norm - 1)**2).mean()
         return penalty
-    
-    
-    # @tf.function
-    def score(self, x_private, label_private):
-        z_private = self.f(x_private)
-        tilde_x_private = self.decoder(z_private)
-        
-        err = torch.mean( distance_data(x_private, tilde_x_private) )
-        
-        return err
-    
-    def scoreAttack(self, dataset):
-        dataset = dataset.batch(self.batch_size, drop_remainder=True)
-        scorelog = 0
-        i = 0
-        for x_private, label_private in tqdm.tqdm(dataset):
-            scorelog += self.score(x_private, label_private).numpy()
-            i += 1
-             
-        return scorelog / i
 
     def attack(self, x_private):
         with torch.no_grad():
@@ -299,100 +252,128 @@ class FSHA:
 #----------------------------------------------------------------------------------------------------------------------
 
 
-# class FSHA_binary_property(FSHA):
+class FSHA_binary_property(FSHA):
     
-#     def loadBiasNetwork(self, make_decoder, z_shape, channels):
-#         class_num = self.hparams.get("class_num", 1)
-#         return make_decoder(z_shape, class_num)
+    def loadBiasNetwork(self, make_decoder, z_shape, channels):
+        class_num = self.hparams.get("class_num", 1)
+        return make_decoder(z_shape, class_num)
     
-#     def binary_accuracy(self, label, logits):
+    def binary_accuracy(self, label, logits):
     
-#         if self.hparams.get('class_num', 1) == 1:
-#             p = tf.nn.sigmoid(logits)
-#             predicted = tf.cast( (p > .5), tf.float32)
-#         else:
-#             p = tf.nn.softmax(logits)
-#             predicted = tf.argmax(p, 1)
+        if self.hparams.get('class_num', 1) == 1:
+            p = nn.Sigmoid(logits)
+            predicted = torch.cast( (p > .5), torch.float32)
+        else:
+            p = nn.Softmax(logits)
+            predicted = torch.argmax(p, 1)
 
-#         correct_prediction = tf.equal(label, predicted)
-#         return tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+        correct_prediction = torch.equal(label, predicted)
+        return torch.mean(torch.cast(correct_prediction, torch.float32))
 
     
-#     def classification_loss(self, label, logits):
-#         if self.hparams.get('class_num', 1) == 1:
-#             return tf.reduce_mean(tf.keras.losses.binary_crossentropy(label, logits, from_logits=True))
-#         else:
-#             return tf.reduce_mean( tf.keras.losses.sparse_categorical_crossentropy(label, logits, from_logits=True) )
+    def classification_loss(self, label, logits):
         
+        if self.hparams.get('class_num', 1) == 1:
+            criterion = nn.BCELoss()
+        else:
+            criterion = nn.CrossEntropyLoss()
+        return criterion(logits, label)
 
-#     @tf.function
-#     def train_step(self, x_private, x_public, label_private, label_public):
+    def train_step(self, x_private, x_public, label_private, label_public):
 
-#         with tf.GradientTape(persistent=True) as tape:
+        torch.autograd.set_detect_anomaly(True)
+        self.f.train()
+        self.tilde_f.train()
+        self.decoder.train()
+        self.D.train()
 
-#             #### Virtually, ON THE CLIENT SIDE:
-#             # clients' smashed data
-#             z_private = self.f(x_private, training=True)
-#             ####################################
+        x_private = x_private.cuda(non_blocking=False)
+        x_public = x_public.cuda(non_blocking=False)
 
-#             #### SERVER-SIDE:
-#             # map to data space (for evaluation and style loss)
-#             clss_private_logits = self.decoder(z_private, training=True)
-#             ## adversarial loss (f's output must be similar to \tilde{f}'s output):
-#             adv_private_logits = self.D(z_private, training=True)
-#             if self.hparams['WGAN']:
-#                 print("Use WGAN loss")
-#                 f_loss = tf.reduce_mean(adv_private_logits)
-#             else:
-#                 f_loss = tf.reduce_mean(tf.keras.losses.binary_crossentropy(tf.ones_like(adv_private_logits), adv_private_logits, from_logits=True))
-#             ##
+        #### Virtually, ON THE CLIENT SIDE:
+        # clients' smashed data
+        z_private = self.f(x_private)
+        ####################################
 
-#             # attacker's classifier
-#             z_public = self.tilde_f(x_public, training=True)
-#             clss_public_logits = self.decoder(z_public, training=True)
+        #### SERVER-SIDE:
+        # map to data space (for evaluation and style loss)
+        clss_private_logits = self.decoder(z_private)
+        ## adversarial loss (f's output must similar be to \tilde{f}'s output):
+        adv_private_logits = self.D(z_private)
+        
+        if self.hparams['WGAN']:
+            # print("Use WGAN loss")
+            f_loss = torch.mean(adv_private_logits)
+        else:
+            criterion = torch.nn.BCELoss()
+            f_loss = criterion(adv_private_logits, torch.ones_like(adv_private_logits.detach()))
 
-#             # classificatio loss
-#             public_classification_loss = self.classification_loss(label_public, clss_public_logits)
-#             public_classification_accuracy = self.binary_accuracy(label_public, clss_public_logits)
-#             tilde_f_loss = public_classification_loss
+        # attacker's classifier
+        z_public = self.tilde_f(x_public)
+        clss_public_logits = self.decoder(z_public)
 
-#             # discriminator on attacker's feature-space
-#             adv_public_logits = self.D(z_public, training=True)
-#             if self.hparams['WGAN']:
-#                 loss_discr_true = tf.reduce_mean(adv_public_logits)
-#                 loss_discr_fake = -tf.reduce_mean(adv_private_logits)
-#                 # discriminator's loss
-#                 D_loss = loss_discr_true + loss_discr_fake
-#             else:
-#                 loss_discr_true = tf.reduce_mean(tf.keras.losses.binary_crossentropy(tf.ones_like(adv_public_logits), adv_public_logits, from_logits=True))
-#                 loss_discr_fake = tf.reduce_mean(tf.keras.losses.binary_crossentropy(tf.zeros_like(adv_private_logits), adv_private_logits, from_logits=True))
-#                 # discriminator's loss
-#                 D_loss = (loss_discr_true + loss_discr_fake) / 2
+        # classificatio loss
+        public_classification_loss = self.classification_loss(label_public, clss_public_logits)
+        
+        tilde_f_loss = public_classification_loss
 
-#             if 'gradient_penalty' in self.hparams:
-#                 print("Use GP")
-#                 w = float(self.hparams['gradient_penalty'])
-#                 D_gradient_penalty = self.gradient_penalty(z_private, z_public)
-#                 D_loss += D_gradient_penalty * w
+        adv_public_logits = self.D(z_public.detach())
+        adv_private_logits_detached = self.D(z_private.detach())
 
-#             ##################################################################
-#             ## attack validation #####################
-#             private_classification_accuracy = self.binary_accuracy(label_private, clss_private_logits)
-#             ############################################
-#             ##################################################################
+        if self.hparams['WGAN']:
+            loss_discr_true = torch.mean( adv_public_logits )
+            loss_discr_fake = -torch.mean( adv_private_logits_detached)
+            # discriminator's loss
+            D_loss = loss_discr_true + loss_discr_fake
+        else:
+            criterion = nn.BCELoss()
+            loss_discr_true = criterion(adv_public_logits, torch.ones_like(adv_public_logits.detach()))
+            loss_discr_fake = criterion(adv_private_logits_detached, torch.zeros_like(adv_private_logits_detached.detach()))
+            # discriminator's loss
+            D_loss = (loss_discr_true + loss_discr_fake) / 2
 
+        if 'gradient_penalty' in self.hparams:
+            # print("Use GP")
+            w = float(self.hparams['gradient_penalty'])
+            D_gradient_penalty = self.gradient_penalty(z_private.detach(), z_public.detach())
+            D_loss += D_gradient_penalty * w
 
-#         var = self.f.trainable_variables
-#         gradients = tape.gradient(f_loss, var)
-#         self.optimizer0.apply_gradients(zip(gradients, var))
+        ##################################################################
+        ## attack validation #####################
+        with torch.no_grad():
+            public_classification_accuracy = self.binary_accuracy(label_public, clss_public_logits)
+            private_classification_accuracy = self.binary_accuracy(label_private, clss_private_logits)
+            private_classification_accuracy_detached = private_classification_accuracy.detach()
+            public_classification_accuracy_detached = public_classification_accuracy.detach()
+            del private_classification_accuracy, public_classification_accuracy
+        ############################################
+        ##################################################################
 
-#         var = self.tilde_f.trainable_variables + self.decoder.trainable_variables
-#         gradients = tape.gradient(tilde_f_loss, var)
-#         self.optimizer1.apply_gradients(zip(gradients, var))
+        self.optimizer0.zero_grad()
+        self.optimizer1.zero_grad()
+        self.optimizer2.zero_grad()
 
-#         var = self.D.trainable_variables
-#         gradients = tape.gradient(D_loss, var)
-#         self.optimizer2.apply_gradients(zip(gradients, var))
+        # train client's network 
+        f_loss.backward()
+        
+        zeroing_grad(self.D)
 
+        # train attacker's autoencoder on public data
+        tilde_f_loss.backward()
+        
+        # train discriminator
+        D_loss.backward()
 
-#         return f_loss, tilde_f_loss, D_loss, private_classification_accuracy, public_classification_accuracy
+        self.optimizer0.step()
+        
+        self.optimizer1.step()
+        
+        self.optimizer2.step()
+
+        f_losses = f_loss.detach()
+        tilde_f_losses = tilde_f_loss.detach()
+        D_losses = D_loss.detach()
+        
+        del f_loss, tilde_f_loss, D_loss
+
+        return f_losses, tilde_f_losses, D_losses, private_classification_accuracy_detached, public_classification_accuracy_detached

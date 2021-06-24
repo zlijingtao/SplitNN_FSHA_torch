@@ -42,14 +42,6 @@ class FSHA:
             self.optimizer0 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_f'])
             self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_tilde'])
             self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_D'])
-            
-
-            # for layer in self.D.layers:
-            #     try:
-            #         print(layer.get_weights()[0]) # weights
-            #         print(layer.get_weights()[1]) # biases
-            #     except:
-            #         pass
 
     @staticmethod
     def addNoise(x, alpha):
@@ -74,7 +66,6 @@ class FSHA:
             if self.hparams['WGAN']:
                 # print("Use WGAN loss")
                 f_loss = tf.reduce_mean(adv_private_logits)
-                tf.print(adv_private_logits)
             else:
                 f_loss = tf.reduce_mean(tf.keras.losses.binary_crossentropy(tf.ones_like(adv_private_logits), adv_private_logits, from_logits=True))
             ##
@@ -187,7 +178,6 @@ class FSHA:
         i, j = 0, 0
         print("RUNNING...")
         for (x_private, label_private), (x_public, label_public) in iterator:
-            # print(np.sum(x_private))
             log = self.train_step(x_private, x_public, label_private, label_public)
 
             if i == 0:
