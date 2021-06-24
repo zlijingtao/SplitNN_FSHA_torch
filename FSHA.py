@@ -18,7 +18,7 @@ class FSHA:
         
     def __init__(self, xpriv, xpub, id_setup, batch_size, hparams):
             input_shape = xpriv.element_spec[0].shape
-            
+            # print(input_shape)
             self.hparams = hparams
 
             # setup dataset
@@ -42,8 +42,14 @@ class FSHA:
             self.optimizer0 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_f'])
             self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_tilde'])
             self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_D'])
+            
 
-
+            # for layer in self.D.layers:
+            #     try:
+            #         print(layer.get_weights()[0]) # weights
+            #         print(layer.get_weights()[1]) # biases
+            #     except:
+            #         pass
 
     @staticmethod
     def addNoise(x, alpha):
@@ -66,8 +72,9 @@ class FSHA:
             ## adversarial loss (f's output must similar be to \tilde{f}'s output):
             adv_private_logits = self.D(z_private, training=True)
             if self.hparams['WGAN']:
-                print("Use WGAN loss")
+                # print("Use WGAN loss")
                 f_loss = tf.reduce_mean(adv_private_logits)
+                tf.print(adv_private_logits)
             else:
                 f_loss = tf.reduce_mean(tf.keras.losses.binary_crossentropy(tf.ones_like(adv_private_logits), adv_private_logits, from_logits=True))
             ##
@@ -94,9 +101,10 @@ class FSHA:
                 D_loss = (loss_discr_true + loss_discr_fake) / 2
 
             if 'gradient_penalty' in self.hparams:
-                print("Use GP")
+                # print("Use GP")
                 w = float(self.hparams['gradient_penalty'])
                 D_gradient_penalty = self.gradient_penalty(z_private, z_public)
+                
                 D_loss += D_gradient_penalty * w
 
             ##################################################################
@@ -179,6 +187,7 @@ class FSHA:
         i, j = 0, 0
         print("RUNNING...")
         for (x_private, label_private), (x_public, label_public) in iterator:
+            # print(np.sum(x_private))
             log = self.train_step(x_private, x_public, label_private, label_public)
 
             if i == 0:

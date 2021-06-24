@@ -1,9 +1,9 @@
 import tensorflow as tf
 import numpy as np
 import tqdm
-import sklearn
+# import sklearn
 import matplotlib.pyplot as plt
-import tensorflow_datasets as tfds
+# import tensorflow_datasets as tfds
 
 BUFFER_SIZE = 10000
 SIZE = 32
